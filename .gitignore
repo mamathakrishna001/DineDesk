@@ -1,0 +1,25 @@
+# Compiled class files
+*.class
+
+# IntelliJ IDEA project files
+*.iml
+.idea/
+
+# Build output directories
+out/
+target/
+build/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# JARs & external libraries (optional, if you don't want to commit libs)
+lib/*.jar
+
+# Temporary files
+*.tmp
+*.swp
