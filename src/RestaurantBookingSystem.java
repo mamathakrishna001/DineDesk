@@ -2,6 +2,7 @@ import java.sql.*;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Scanner;
+import org.mindrot.jbcrypt.BCrypt;
 
 public class RestaurantBookingSystem {
     // ====== DB CONFIG ======
@@ -15,6 +16,7 @@ public class RestaurantBookingSystem {
     private static final String RED = "\u001B[31m";
     private static final String CYAN = "\u001B[36m";
     private static final String YELLOW = "\u001B[33m";
+    private static final String BLUE = "\u001B[34m";
 
     public static void main(String[] args) {
         try {
@@ -51,7 +53,7 @@ public class RestaurantBookingSystem {
                     case 4 -> updateBooking(connection, scanner);
                     case 5 -> cancelBooking(connection, scanner);
                     case 6 -> searchAvailableTables(connection, scanner);
-                    case 7 -> managerMenu(connection, scanner);
+                    case 7 -> managerLogin(connection, scanner);
                     case 8 -> generateBill(connection, scanner);
                     case 0 -> { exit(); return; }
                     default -> System.out.println(RED + "❌ Invalid choice. Try again." + RESET);
@@ -244,10 +246,220 @@ public class RestaurantBookingSystem {
         }
     }
 
-    // ===================== MANAGER FUNCTIONS =====================
+    // ===================== MANAGER LOGIN & FUNCTIONS =====================
+    private static void managerLogin(Connection connection, Scanner scanner) {
+        try {
+            System.out.println(BLUE + "===== MANAGER LOGIN =====" + RESET);
+            System.out.print("Enter username: ");
+            String username = readToken(scanner);
+            System.out.print("Enter password: ");
+            String password = readToken(scanner);
+
+            String sql = "SELECT password_hash FROM managers WHERE username = ?";
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                ps.setString(1, username);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        String storedHash = rs.getString("password_hash");
+                        if (BCrypt.checkpw(password, storedHash)) {
+                            System.out.println(GREEN + "✅ Login successful! Welcome, " + username + "!" + RESET);
+                            managerMenu(connection, scanner);
+                        } else {
+                            System.out.println(RED + "❌ Invalid credentials!" + RESET);
+                        }
+                    } else {
+                        System.out.println(RED + "❌ User not found!" + RESET);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            System.out.println(RED + "Database error: " + e.getMessage() + RESET);
+        }
+    }
+
     private static void managerMenu(Connection connection, Scanner scanner) {
-        System.out.println(YELLOW + "Manager features coming soon (like menu & table mgmt)." + RESET);
-        // Implement similarly to hotel manager menu
+        while (true) {
+            System.out.println();
+            System.out.println(BLUE + "======== MANAGER PANEL ========" + RESET);
+            System.out.println("1. View All Bookings");
+            System.out.println("2. Manage Tables");
+            System.out.println("3. Manage Meals");
+            System.out.println("4. Booking Analytics");
+            System.out.println("5. Add New Table");
+            System.out.println("6. Update Table Status");
+            System.out.println("0. Back to Main Menu");
+            System.out.print(YELLOW + "Choose an option: " + RESET);
+
+            int choice = readInt(scanner);
+
+            switch (choice) {
+                case 1 -> managerViewBookings(connection);
+                case 2 -> manageTables(connection, scanner);
+                case 3 -> manageMeals(connection, scanner);
+                case 4 -> bookingAnalytics(connection);
+                case 5 -> addNewTable(connection, scanner);
+                case 6 -> updateTableStatus(connection, scanner);
+                case 0 -> { return; }
+                default -> System.out.println(RED + "❌ Invalid choice. Try again." + RESET);
+            }
+        }
+    }
+
+    private static void managerViewBookings(Connection connection) {
+        String sql = """
+            SELECT b.booking_id, b.customer_name, b.contact_number, b.table_number, 
+                   b.booking_time, m.meal_name, b.quantity, b.total_price
+            FROM bookings b
+            JOIN meals m ON b.meal_id = m.meal_id
+            ORDER BY b.booking_time DESC
+            """;
+        try (Statement st = connection.createStatement();
+             ResultSet rs = st.executeQuery(sql)) {
+            System.out.println(CYAN + "All Bookings (Manager View):" + RESET);
+            System.out.println("+----+-----------------+------------+-------+-------------------+----------------+-----+---------+");
+            System.out.println("| ID | Customer        | Contact    | Table | Time              | Meal           | Qty | Total   |");
+            System.out.println("+----+-----------------+------------+-------+-------------------+----------------+-----+---------+");
+            while (rs.next()) {
+                System.out.printf("| %-2d | %-15s | %-10s | %-5d | %-17s | %-14s | %-3d | ₹%-6.2f |\n",
+                        rs.getInt("booking_id"), rs.getString("customer_name"), rs.getString("contact_number"),
+                        rs.getInt("table_number"), rs.getString("booking_time"), rs.getString("meal_name"),
+                        rs.getInt("quantity"), rs.getDouble("total_price"));
+            }
+            System.out.println("+----+-----------------+------------+-------+-------------------+----------------+-----+---------+");
+        } catch (SQLException e) {
+            System.out.println(RED + "Error: " + e.getMessage() + RESET);
+        }
+    }
+
+    private static void manageTables(Connection connection, Scanner scanner) {
+        String sql = "SELECT table_number, seats, is_available FROM tables ORDER BY table_number";
+        try (Statement st = connection.createStatement();
+             ResultSet rs = st.executeQuery(sql)) {
+            System.out.println(CYAN + "Table Management:" + RESET);
+            System.out.println("+-------+-------+-----------+");
+            System.out.println("| Table | Seats | Available |");
+            System.out.println("+-------+-------+-----------+");
+            while (rs.next()) {
+                String status = rs.getBoolean("is_available") ? "✅ Yes" : "❌ No";
+                System.out.printf("| %-5d | %-5d | %-9s |\n",
+                        rs.getInt("table_number"), rs.getInt("seats"), status);
+            }
+            System.out.println("+-------+-------+-----------+");
+        } catch (SQLException e) {
+            System.out.println(RED + "Error: " + e.getMessage() + RESET);
+        }
+    }
+
+    private static void manageMeals(Connection connection, Scanner scanner) {
+        String sql = "SELECT meal_id, meal_name, price FROM meals ORDER BY meal_id";
+        try (Statement st = connection.createStatement();
+             ResultSet rs = st.executeQuery(sql)) {
+            System.out.println(CYAN + "Meal Management:" + RESET);
+            System.out.println("+----+--------------------+---------+");
+            System.out.println("| ID | Meal Name          | Price   |");
+            System.out.println("+----+--------------------+---------+");
+            while (rs.next()) {
+                System.out.printf("| %-2d | %-18s | ₹%-6.2f |\n",
+                        rs.getInt("meal_id"), rs.getString("meal_name"), rs.getDouble("price"));
+            }
+            System.out.println("+----+--------------------+---------+");
+        } catch (SQLException e) {
+            System.out.println(RED + "Error: " + e.getMessage() + RESET);
+        }
+    }
+
+    private static void bookingAnalytics(Connection connection) {
+        try {
+            // Total bookings
+            String totalSql = "SELECT COUNT(*) as total FROM bookings";
+            try (Statement st = connection.createStatement();
+                 ResultSet rs = st.executeQuery(totalSql)) {
+                rs.next();
+                int totalBookings = rs.getInt("total");
+                System.out.println(GREEN + "📊 Total Bookings: " + totalBookings + RESET);
+            }
+
+            // Total revenue
+            String revenueSql = "SELECT SUM(total_price) as revenue FROM bookings";
+            try (Statement st = connection.createStatement();
+                 ResultSet rs = st.executeQuery(revenueSql)) {
+                rs.next();
+                double totalRevenue = rs.getDouble("revenue");
+                System.out.println(GREEN + "💰 Total Revenue: ₹" + String.format("%.2f", totalRevenue) + RESET);
+            }
+
+            // Most popular table
+            String popularTableSql = """
+                SELECT table_number, COUNT(*) as bookings 
+                FROM bookings 
+                GROUP BY table_number 
+                ORDER BY bookings DESC 
+                LIMIT 1
+                """;
+            try (Statement st = connection.createStatement();
+                 ResultSet rs = st.executeQuery(popularTableSql)) {
+                if (rs.next()) {
+                    System.out.println(GREEN + "🏆 Most Popular Table: " + rs.getInt("table_number") +
+                            " (" + rs.getInt("bookings") + " bookings)" + RESET);
+                }
+            }
+
+        } catch (SQLException e) {
+            System.out.println(RED + "Error: " + e.getMessage() + RESET);
+        }
+    }
+
+    private static void addNewTable(Connection connection, Scanner scanner) {
+        try {
+            System.out.print("Enter table number: ");
+            int tableNumber = readInt(scanner);
+
+            if (tableExists(connection, tableNumber)) {
+                System.out.println(RED + "❌ Table already exists!" + RESET);
+                return;
+            }
+
+            System.out.print("Enter number of seats: ");
+            int seats = readInt(scanner);
+
+            String sql = "INSERT INTO tables (table_number, seats, is_available) VALUES (?, ?, TRUE)";
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                ps.setInt(1, tableNumber);
+                ps.setInt(2, seats);
+                int rows = ps.executeUpdate();
+                System.out.println(rows > 0 ? GREEN + "✅ Table added successfully!" + RESET :
+                        RED + "❌ Failed to add table." + RESET);
+            }
+        } catch (SQLException e) {
+            System.out.println(RED + "Error: " + e.getMessage() + RESET);
+        }
+    }
+
+    private static void updateTableStatus(Connection connection, Scanner scanner) {
+        try {
+            System.out.print("Enter table number: ");
+            int tableNumber = readInt(scanner);
+
+            if (!tableExists(connection, tableNumber)) {
+                System.out.println(RED + "❌ Table not found!" + RESET);
+                return;
+            }
+
+            System.out.print("Set table as available? (1=Yes, 0=No): ");
+            int status = readInt(scanner);
+            boolean isAvailable = status == 1;
+
+            String sql = "UPDATE tables SET is_available = ? WHERE table_number = ?";
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                ps.setBoolean(1, isAvailable);
+                ps.setInt(2, tableNumber);
+                int rows = ps.executeUpdate();
+                System.out.println(rows > 0 ? GREEN + "✅ Table status updated!" + RESET :
+                        RED + "❌ Failed to update table." + RESET);
+            }
+        } catch (SQLException e) {
+            System.out.println(RED + "Error: " + e.getMessage() + RESET);
+        }
     }
 
     private static void generateBill(Connection connection, Scanner scanner) {
